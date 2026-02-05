@@ -185,14 +185,5 @@ kubectl get mutatingwebhookconfiguration spot-balancer-webhook -o yaml | grep na
 ```
 
 ### Tests
-- Unit:
-```bash
-APP_ENV=test PYTHONPATH=. pytest -q spot_balancer/tests
-```
-- Live spot checks (read-only), e.g.:
-```bash
-NS=<workload-ns>
-kubectl -n "$NS" get pods -l spark-role=driver -o json \
-| jq -r '.items | sort_by(.metadata.creationTimestamp) | reverse | .[:2][] | [.metadata.labels["emr-containers.amazonaws.com/job.id"], (.metadata.annotations["workload/spot-ratio"] // "<unset>"), .spec.nodeName] | @tsv'
-``` 
+
 For full unit and e2e tests instructions, see `./tests/README.md`.
