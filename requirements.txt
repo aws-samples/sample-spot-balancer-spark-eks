@@ -1,0 +1,4 @@
+flask>=3.1.1
+gunicorn
+kubernetes>=33.1.0
+redis>=5.0.0

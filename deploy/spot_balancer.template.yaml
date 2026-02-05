@@ -1,0 +1,277 @@
+# REPLACE <VARIABLES> WITH YOUR CONFIG VALUES
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  # This is the Namespace where you want to run this
+  name: <NAMESPACE>
+  labels:
+    spot-balancer: "enabled"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spot-balancer-webhook
+  namespace: <NAMESPACE>
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned
+  namespace: <NAMESPACE>
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: spot-balancer-serving
+  namespace: <NAMESPACE>
+spec:
+  secretName: spot-balancer-webhook-tls
+  dnsNames:
+    - spot-balancer-webhook.<NAMESPACE>.svc
+    - spot-balancer-webhook.<NAMESPACE>.svc.cluster.local
+  issuerRef:
+    name: selfsigned
+    kind: Issuer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spot-balancer-webhook
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spot-balancer-webhook
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spot-balancer-webhook
+subjects:
+  - kind: ServiceAccount
+    name: spot-balancer-webhook
+    namespace: <NAMESPACE>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spot-balancer-webhook
+  namespace: <NAMESPACE>
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spot-balancer-webhook
+  template:
+    metadata:
+      labels:
+        app: spot-balancer-webhook
+    spec:
+      serviceAccountName: spot-balancer-webhook
+      # Pod-level security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      # Schedule on an on-demand only NodePool
+      nodeSelector:
+        node-type: <NODEPOOL_LABEL_VALUE>
+      tolerations:
+        - key: "node-type"
+          operator: "Equal"
+          value: "<NODEPOOL_LABEL_VALUE>"
+          effect: "NoSchedule"
+      containers:
+        - name: spot-balancer
+          # IMPORTANT: Replace <IMAGE:TAG> with actual tagged image (e.g., myregistry/spot-balancer:v1.2.3)
+          image: <IMAGE:TAG>
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: TLS_CERT_PATH
+              value: "/tls/tls.crt"
+            - name: TLS_KEY_PATH
+              value: "/tls/tls.key"
+            - name: PORT
+              value: "8443"
+            - name: REDIS_URL
+              value: "<REDIS_URL>"
+            - name: DEFAULT_SPOT_RATIO
+              value: "<DEFAULT_SPOT_RATIO>"
+            # Label/annotation keys to match your submitting jobs
+            - name: SPOT_RATIO_ANNOTATION
+              value: "<SPOT_RATIO_ANNOTATION>"
+            - name: WORKLOAD_ROLE_LABEL
+              value: "<WORKLOAD_ROLE_LABEL>"
+            - name: DRIVER_ROLE_VALUE
+              value: "<DRIVER_ROLE_VALUE>"
+            - name: EXECUTOR_ROLE_VALUE
+              value: "<EXECUTOR_ROLE_VALUE>"
+          ports:
+            - containerPort: 8443
+              name: https
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /health
+              port: https
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /health
+              port: https
+            initialDelaySeconds: 10
+            periodSeconds: 10
+        - name: redis
+          image: redis:7-alpine
+          command: ["redis-server", "--bind", "127.0.0.1"]
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - containerPort: 6379
+              name: redis
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+            - name: redis-tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "200m"
+              memory: "512Mi"
+      volumes:
+        - name: tls
+          secret:
+            secretName: spot-balancer-webhook-tls
+        - name: tmp
+          emptyDir: {}
+        - name: redis-data
+          emptyDir: {}
+        - name: redis-tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spot-balancer-webhook
+  namespace: <NAMESPACE>
+spec:
+  selector:
+    app: spot-balancer-webhook
+  ports:
+    - name: https
+      port: 443
+      targetPort: 8443
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: spot-balancer-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: <NAMESPACE>/spot-balancer-serving
+webhooks:
+  - name: spot-balancer-webhook.admission.k8s.local
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    timeoutSeconds: 10
+    failurePolicy: Ignore
+    # PORTABILITY: Replace with a label-based selector if you prefer. This mirrors current cluster by name list.
+    namespaceSelector:
+      matchExpressions:
+        - key: name
+          operator: In
+          values: [<TARGET_NAMESPACES_COMMA_SEPARATED>]
+    objectSelector:
+      matchLabels:
+        <WORKLOAD_ROLE_LABEL>: <EXECUTOR_ROLE_VALUE>
+    clientConfig:
+      service:
+        name: spot-balancer-webhook
+        namespace: <NAMESPACE>
+        path: /mutate
+        port: 443
+      # caBundle auto-injected by cert-manager via annotation
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+        scope: "Namespaced"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: spot-balancer-webhook-validate
+  annotations:
+    cert-manager.io/inject-ca-from: <NAMESPACE>/spot-balancer-serving
+webhooks:
+  - name: spot-balancer-webhook-validate.admission.k8s.local
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    timeoutSeconds: 10
+    failurePolicy: Ignore
+    namespaceSelector:
+      matchExpressions:
+        - key: name
+          operator: In
+          values: [<TARGET_NAMESPACES_COMMA_SEPARATED>]
+    objectSelector:
+      matchLabels:
+        <WORKLOAD_ROLE_LABEL>: <EXECUTOR_ROLE_VALUE>
+    clientConfig:
+      service:
+        name: spot-balancer-webhook
+        namespace: <NAMESPACE>
+        path: /validate
+        port: 443
+      # caBundle auto-injected by cert-manager via annotation
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["DELETE"]
+        resources: ["pods"]
+        scope: "Namespaced"

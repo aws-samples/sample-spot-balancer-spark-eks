@@ -1,0 +1,92 @@
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: spark-executor-nodepool
+spec:
+  template:
+    metadata:
+      labels:
+        spark-role: executor
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      requirements:
+        - key: eks.amazonaws.com/instance-family
+          operator: In
+          values:
+            - m5
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values:
+            - xlarge
+            - 2xlarge
+            - 4xlarge
+            - 8xlarge
+            - 12xlarge
+            - 16xlarge
+            - 24xlarge
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values:
+            - spot
+            - on-demand
+        - key: kubernetes.io/arch
+          operator: In
+          values:
+            - amd64
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30s
+  limits:
+    cpu: "1000"
+    memory: 15000Gi
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: tooling-ondemand-nodepool
+spec:
+  template:
+    metadata:
+      labels:
+        node-type: tooling
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: default
+      requirements:
+        - key: eks.amazonaws.com/instance-family
+          operator: In
+          values:
+            - t3
+            - t3a
+            - m5
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values:
+            - medium
+            - large
+            - xlarge
+            - 2xlarge
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values:
+            - on-demand
+        - key: kubernetes.io/arch
+          operator: In
+          values:
+            - amd64
+      taints:
+        - key: node-type
+          value: tooling
+          effect: NoSchedule
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30s
+  limits:
+    cpu: "100"
+    memory: 200Gi

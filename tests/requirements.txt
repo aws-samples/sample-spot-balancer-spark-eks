@@ -1,0 +1,5 @@
+# Test dependencies
+pytest>=8.0.0
+
+# Include base application dependencies
+-r ../requirements.txt
