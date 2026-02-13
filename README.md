@@ -145,7 +145,8 @@ Components:
 ## Prerequisites
 
 1) EKS cluster with auto-mode enabled.
-2) App image pushed to a registry available to the cluster (for example, ECR). Use multi-platform builds if possible. For example:
+2) **EMR on EKS Auto Mode:** If you use EMR on EKS Auto Mode, its default Node Pool is on-demand only. To allow Spot Balancer to provision spot instances, configure a custom Node Pool that includes spot capacity.
+3) App image pushed to a registry available to the cluster (for example, ECR). Use multi-platform builds if possible. For example:
 ```
 docker buildx build --platform linux/amd64,linux/arm64 -t sample_spot_balancer_spark_eks:0.1 .
 ```
@@ -165,7 +166,7 @@ helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespa
    - `<WORKLOAD_ROLE_LABEL>`: pod label key that marks role (default `spark-role`)
    - `<DRIVER_ROLE_VALUE>` / `<EXECUTOR_ROLE_VALUE>`: role values (default `driver` / `executor`)
    - `<SPOT_RATIO_ANNOTATION>`: annotation key on the driver that holds the ratio (e.g., `workload/spot-ratio`)
-   - `<NODEPOOL_LABEL_VALUE>`: node label value for your on-demand pool (e.g., `tooling`). There are nodepools definitions that can be used for testing in the ./tests/e2e directory
+   - `<NODEPOOL_LABEL_VALUE>`: node label value for your on-demand pool (e.g., `tooling`). Example NodePool definitions for testing are in [./tests/e2e/node_pools.yaml](./tests/e2e/node_pools.yaml).
    - `<TARGET_NAMESPACES_COMMA_SEPARATED>`: list of workload namespaces to target (e.g., `sandbox`)
 3) Apply:
 ```bash
